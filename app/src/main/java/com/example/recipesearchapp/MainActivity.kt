@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -13,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -68,7 +71,9 @@ fun HomeScreen(
     val recipes = viewModel.recipes.collectAsState()
     val isLoading = viewModel.isLoading.collectAsState()
     val error = viewModel.error.collectAsState()
-    var searchQuery by remember { mutableStateOf("") }
+    val searchQuery = viewModel.searchQuery.collectAsState()
+    val filteredRecipes = viewModel.filteredRecipes.collectAsState()
+    val focusManager = LocalFocusManager.current
     
     // Use secure API key from BuildConfig
     val apiKey = BuildConfig.SPOONACULAR_API_KEY
@@ -81,6 +86,12 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFFF8F9FA))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) {
+                focusManager.clearFocus()
+            }
     ) {
         // Header Section
         Column(
@@ -122,32 +133,40 @@ fun HomeScreen(
             
             // Search Bar
             SearchBar(
-                query = searchQuery,
-                onQueryChange = { searchQuery = it },
-                onSearch = { /* TODO: Implement search */ },
+                query = searchQuery.value,
+                onQueryChange = { viewModel.updateSearchQuery(it) },
+                onSearch = { /* Search is reactive, no action needed */ },
                 modifier = Modifier.padding(horizontal = 0.dp)
             )
         }
         
         // Content Section
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {
+                    focusManager.clearFocus()
+                },
             contentPadding = PaddingValues(bottom = 16.dp)
         ) {
-            // Popular Recipes Section
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 24.dp)
-                ) {
-                    Text(
-                        text = "Popular Recipes",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
+            // Popular Recipes Section - Hide when searching
+            if (searchQuery.value.isBlank()) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 24.dp)
+                    ) {
+                        Text(
+                            text = "Popular Recipes",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
                     
                     when {
                         isLoading.value -> {
@@ -193,11 +212,18 @@ fun HomeScreen(
                     }
                 }
             }
+            }
             
             // All Recipes Section
             item {
+                val displayText = if (searchQuery.value.isBlank()) {
+                    "All recipes"
+                } else {
+                    "Search results (${filteredRecipes.value.size})"
+                }
+                
                 Text(
-                    text = "All recipes",
+                    text = displayText,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.Black,
@@ -205,10 +231,51 @@ fun HomeScreen(
                 )
             }
             
-            // All Recipes List
+            // All Recipes List - Show filtered results
             when {
-                recipes.value != null -> {
-                    items(recipes.value!!.recipes) { recipe ->
+                isLoading.value -> {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                }
+                filteredRecipes.value.isEmpty() && searchQuery.value.isNotBlank() -> {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "🔍",
+                                fontSize = 48.sp
+                            )
+                            Text(
+                                text = "No recipes found",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black,
+                                modifier = Modifier.padding(top = 16.dp)
+                            )
+                            Text(
+                                text = "Try searching for something else",
+                                fontSize = 14.sp,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(top = 8.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+                filteredRecipes.value.isNotEmpty() -> {
+                    items(filteredRecipes.value) { recipe ->
                         RegularRecipeCard(
                             title = recipe.title,
                             readyInMinutes = "Ready in ${recipe.readyInMinutes ?: 25} min",
