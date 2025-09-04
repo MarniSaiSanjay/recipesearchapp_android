@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.recipesearchapp.BuildConfig
 import com.example.recipesearchapp.components.*
 import com.example.recipesearchapp.ui.theme.RecipeSearchAppTheme
 import com.example.recipesearchapp.viewmodel.HomeViewModel
@@ -30,9 +31,20 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            RecipeSearchAppTheme {
-                RecipeApp()
+        try {
+            setContent {
+                RecipeSearchAppTheme {
+                    RecipeApp()
+                }
+            }
+        } catch (e: Exception) {
+            // Log the error and show a basic fallback UI
+            e.printStackTrace()
+            setContent {
+                Text(
+                    text = "Error loading app: ${e.message}",
+                    modifier = Modifier.padding(16.dp)
+                )
             }
         }
     }
@@ -73,13 +85,20 @@ fun HomeScreen(
     val error = viewModel.error.collectAsState()
     val searchQuery = viewModel.searchQuery.collectAsState()
     val filteredRecipes = viewModel.filteredRecipes.collectAsState()
+    val favorites = viewModel.favorites.collectAsState()
     val focusManager = LocalFocusManager.current
     
     // Use secure API key from BuildConfig
-    val apiKey = BuildConfig.SPOONACULAR_API_KEY
+    val apiKey = try {
+        BuildConfig.SPOONACULAR_API_KEY.takeIf { it.isNotEmpty() } ?: "YOUR_API_KEY_HERE"
+    } catch (e: Exception) {
+        "YOUR_API_KEY_HERE"
+    }
 
     LaunchedEffect(Unit) {
-        viewModel.loadRandomRecipes(apiKey)
+        if (apiKey != "YOUR_API_KEY_HERE") {
+            viewModel.loadRandomRecipes(apiKey)
+        }
     }
 
     Column(
@@ -276,12 +295,13 @@ fun HomeScreen(
                 }
                 filteredRecipes.value.isNotEmpty() -> {
                     items(filteredRecipes.value) { recipe ->
+                        val isFavorite = favorites.value.any { it.id == recipe.id }
                         RegularRecipeCard(
                             title = recipe.title,
                             readyInMinutes = "Ready in ${recipe.readyInMinutes ?: 25} min",
                             imageUrl = recipe.image,
-                            isFavorite = false, // TODO: Implement favorite state
-                            onFavoriteClick = { /* TODO: Implement favorite toggle */ },
+                            isFavorite = isFavorite,
+                            onFavoriteClick = { viewModel.toggleFavorite(recipe) },
                             onClick = { /* TODO: Navigate to recipe detail */ },
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                         )
@@ -293,31 +313,95 @@ fun HomeScreen(
 }
 
 @Composable
-fun FavoriteScreen(modifier: Modifier = Modifier) {
+fun FavoriteScreen(
+    viewModel: HomeViewModel = hiltViewModel(),
+    modifier: Modifier = Modifier
+) {
+    val favorites = viewModel.favorites.collectAsState()
+    
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFF8F9FA)),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .background(Color(0xFFF8F9FA))
     ) {
-        Text(
-            text = "❤️",
-            fontSize = 48.sp
-        )
-        Text(
-            text = "Favorite Recipes",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.Black,
-            modifier = Modifier.padding(top = 16.dp)
-        )
-        Text(
-            text = "Your favorite recipes will appear here",
-            fontSize = 16.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(top = 8.dp),
-            textAlign = TextAlign.Center
-        )
+        // Header
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "❤️ Favorite Recipes",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black
+            )
+            Text(
+                text = "${favorites.value.size} recipes saved",
+                fontSize = 14.sp,
+                color = Color.Gray,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        
+        // Content
+        if (favorites.value.isEmpty()) {
+            // Empty state
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "💔",
+                    fontSize = 48.sp
+                )
+                Text(
+                    text = "No Favorite Recipes",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black,
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+                Text(
+                    text = "Start adding recipes to your favorites by tapping the heart icon!",
+                    fontSize = 16.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(top = 8.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
+            // Favorites list
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(favorites.value) { favorite ->
+                    RegularRecipeCard(
+                        title = favorite.title,
+                        readyInMinutes = "Ready in ${favorite.readyInMinutes ?: 25} min",
+                        imageUrl = favorite.image,
+                        isFavorite = true,
+                        onFavoriteClick = { 
+                            // Convert FavoriteRecipe back to Recipe for toggleFavorite
+                            val recipe = com.example.recipesearchapp.model.Recipe(
+                                id = favorite.id,
+                                title = favorite.title,
+                                image = favorite.image,
+                                readyInMinutes = favorite.readyInMinutes,
+                                servings = favorite.servings
+                            )
+                            viewModel.toggleFavorite(recipe)
+                        },
+                        onClick = { /* TODO: Navigate to recipe detail */ }
+                    )
+                }
+            }
+        }
     }
 }

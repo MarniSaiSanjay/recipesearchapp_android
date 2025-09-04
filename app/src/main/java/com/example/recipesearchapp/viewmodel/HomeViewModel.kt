@@ -2,19 +2,23 @@ package com.example.recipesearchapp.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.recipesearchapp.data.FavoriteRecipe
 import com.example.recipesearchapp.model.Recipe
 import com.example.recipesearchapp.model.RecipeResponse
 import com.example.recipesearchapp.repository.RecipeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
  * ViewModel for home screen managing recipe data with StateFlow.
- * Handles UI state including loading, success, and error states.
+ * Handles UI state including loading, success, error states, and favorites.
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -31,6 +35,10 @@ class HomeViewModel @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
+    // Favorites from Room database
+    val favorites: StateFlow<List<FavoriteRecipe>> = repository.getAllFavorites()
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
     // Filtered recipes based on search query
     val filteredRecipes: StateFlow<List<Recipe>> = combine(
         _allRecipes,
@@ -43,36 +51,47 @@ class HomeViewModel @Inject constructor(
                 recipe.title.contains(query, ignoreCase = true)
             }
         }
-    }.let { flow ->
-        MutableStateFlow(emptyList<Recipe>()).apply {
-            viewModelScope.launch {
-                flow.collect { value = it }
-            }
-        }
-    }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     // For backwards compatibility with existing UI
-    val recipes: StateFlow<RecipeResponse?> = combine(
-        filteredRecipes,
-        _isLoading
-    ) { filtered, loading ->
-        if (!loading && filtered.isNotEmpty()) {
-            RecipeResponse(recipes = filtered)
-        } else if (!loading && _allRecipes.value.isNotEmpty()) {
-            RecipeResponse(recipes = _allRecipes.value)
-        } else {
-            null
-        }
-    }.let { flow ->
-        MutableStateFlow<RecipeResponse?>(null).apply {
-            viewModelScope.launch {
-                flow.collect { value = it }
+    val recipes: StateFlow<RecipeResponse?> = _allRecipes
+        .map { recipes ->
+            if (recipes.isNotEmpty()) {
+                RecipeResponse(recipes = recipes)
+            } else {
+                null
             }
-        }
-    }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
 
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
+    }
+
+    fun toggleFavorite(recipe: Recipe) {
+        viewModelScope.launch {
+            try {
+                val isFavorite = favorites.value.any { it.id == recipe.id }
+                if (isFavorite) {
+                    repository.removeFavorite(recipe.id)
+                } else {
+                    repository.addFavorite(recipe)
+                }
+            } catch (e: Exception) {
+                _error.value = "Failed to update favorite: ${e.message}"
+            }
+        }
+    }
+
+    fun isFavorite(recipeId: Int): Boolean {
+        return favorites.value.any { it.id == recipeId }
     }
 
     fun loadRandomRecipes(apiKey: String) {
