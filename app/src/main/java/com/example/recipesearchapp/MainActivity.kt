@@ -42,8 +42,8 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     val isLoading = viewModel.isLoading.collectAsState()
     val error = viewModel.error.collectAsState()
     
-    // Replace with your actual API key
-    val apiKey = "YOUR_API_KEY_HERE"
+    // Use secure API key from BuildConfig
+    val apiKey = BuildConfig.SPOONACULAR_API_KEY
 
     LaunchedEffect(Unit) {
         viewModel.loadRandomRecipes(apiKey)
